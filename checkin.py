@@ -558,10 +558,14 @@ class Accounts:
 
     @classmethod
     def _parse_json(cls, text: str, verbose: bool) -> "Accounts":
+        normalized = cls._strip_trailing_commas(text)
         try:
-            parsed = json.loads(text)
+            parsed = json.loads(normalized)
         except json.JSONDecodeError as e:
             raise ValueError(f"不是合法 JSON（只支持 JSON 数组格式）：{e}") from e
+
+        if normalized != text:
+            logger.warning(f"{LogEmoji.WARNING} 检测到 JSON 末尾多余逗号，已自动修复，建议更新 Secret 中的 GLADOS_COOKIES。")
 
         if not isinstance(parsed, list):
             raise ValueError("只支持 JSON 数组格式：[{...}, {...}]")
@@ -570,6 +574,40 @@ class Accounts:
 
         items = [cls._parse_item(item, position) for position, item in enumerate(parsed, 1)]
         return cls(cls._dedupe(items, verbose))
+
+    @staticmethod
+    def _strip_trailing_commas(text: str) -> str:
+        """移除 JSON 对象/数组末尾的多余逗号（仅处理字符串外部）。"""
+        chars = list(text)
+        in_string = False
+        escaped = False
+        i = 0
+        while i < len(chars):
+            ch = chars[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                i += 1
+                continue
+
+            if ch == '"':
+                in_string = True
+                i += 1
+                continue
+
+            if ch == ",":
+                j = i + 1
+                while j < len(chars) and chars[j].isspace():
+                    j += 1
+                if j < len(chars) and chars[j] in "]}":
+                    del chars[i]
+                    continue
+            i += 1
+        return "".join(chars)
 
     @classmethod
     def _parse_legacy(cls, text: str, verbose: bool) -> "Accounts":
